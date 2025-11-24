@@ -8,7 +8,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score, precision_score, recall_score, roc_curve, auc
 
 from collections import Counter
-from Connection import load_pickle, get_match_rows
+from .Connection import load_pickle, get_match_rows
 
 # GLOBAL VARIABLES =========================================
 SEED_VAL = 42 # for random seeding/testing reproducability
@@ -102,7 +102,7 @@ def measureRandSpread(trials):
 
 if (DATA_FLAG):
     print("Loading DrDoS_UDP.gz... please wait...")
-    X, y = joblib.load("training_network_data.joblib")
+    X, y = joblib.load("data/training_network_data.joblib")
     print("Loaded features:", X.shape)
     print("Loaded labels:,", y.shape)
     print("Label counts:", y.value_counts())

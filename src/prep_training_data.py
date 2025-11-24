@@ -4,11 +4,11 @@ import pandas as pd
 import joblib
 
 from collections import Counter
-from Connection import load_pickle, get_match_rows
+from .Connection import load_pickle, get_match_rows
 #
 #DATA_FILES = ["DrDos_DNS.gz", "DrDos_LDAP.gz", "DrDos_MSSQL.gz", "DrDos_NetBIOS.gz", "DrDos_NTP.gz", "DrDos_SNMP.gz", "DrDos_SSDP.gz", "DrDos_UDP.gz", "Syn.gz", "TFTP.gz", "UDPLag.gz"]
-DATA_FILES = "UDP.gz"
-LABEL_COL = 87
+DATA_FILES = "data/DrDoS_UDP_74len.gz"
+#LABEL_COL = 87
 FLOWID_COL = 1
 SEED_VAL = 42
 BALANCE_FLAG = True
@@ -46,9 +46,23 @@ n_benign = 0
     except Exception as e: 
         print(f"[error] {fname}: {e}")'''
 
-#print(f"[load] {DATA_FILES} ...")
-rows = load_pickle("DrDoS_UDP.gz") 
+print(f"[load] {DATA_FILES} ...")
+rows = load_pickle(DATA_FILES)
 n = len(rows)
+
+if not rows:
+    print("[!] WARNING: No rows loaded from file, ABORT.")
+    sys.exit(1)
+
+num_cols = len(rows[0])
+print(f"Loaded {n:,} rows with {num_cols} columns each")
+LABEL_COL = num_cols - 1
+
+filtered_rows = [r for r in rows if len(r) > LABEL_COL]
+if len(filtered_rows) < len(rows):
+    print(f"[!] WARNING: Dropped {len(rows) - len(filtered_rows)} rows with too few columns.")
+rows = filtered_rows
+
 labels = [r[LABEL_COL] for r in rows]
 c = Counter(labels)
 overall_counts.update(c)
@@ -60,7 +74,8 @@ benign_all.extend(benign_rows)
 attacks_rows = [r for r in rows if r[LABEL_COL] != 0]
 attacks_all.extend(attacks_rows)
 
-print(f"  rows: {n:,}, label counts: {dict(c)} | benign in file: {len(benign_rows):,}")
+print(f"    rows: {n:,}, label counts: {dict(c)} | benign in file: {len(benign_rows):,}")
+
 
 print("\n SUMMARY (per file):")
 for fname, n, c in per_file: print(f"{fname:18s} -> rows={n:,} labels={c}")
@@ -108,6 +123,6 @@ X = X.dropna(axis=1, how="all").fillna(0)
 
 print(f"Features shape: {X.shape} | Labels: {y.value_counts().to_dict()}")
 
-out_path = "training_network_data.joblib"
+out_path = "data/training_network_data.joblib"
 joblib.dump((X,y), out_path)
 print(f"\nTraining data saved to {out_path}!")
