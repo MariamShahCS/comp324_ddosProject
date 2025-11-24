@@ -1,20 +1,15 @@
 import pandas as pd
 import numpy as np
-import joblib
-import os, sys, math
+import joblib, os
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score, precision_score, recall_score, roc_curve, auc
 
-from collections import Counter
-from .Connection import load_pickle, get_match_rows
-
 # GLOBAL VARIABLES =========================================
 SEED_VAL = 42 # for random seeding/testing reproducability
 RAND_FLAG = True   # if random set True, else if fixed set False
 DATA_FLAG = True   # if using dummyData set False, if using actual data set True
-DATA_FILES = ["DrDos_DNS.gz", "DrDos_LDAP.gz", "DrDos_MSSQL.gz", "DrDos_NetBIOS.gz", "DrDos_NTP.gz", "DrDos_SNMP.gz", "DrDos_SSDP.gz", "DrDos_UDP.gz", "Syn.gz", "TFTP.gz", "UDPLag.gz"]
 
 # FUNCTION DEFINITIONS ==================================
 # genDummyData(): generate dummy dataset with super simple indicators
@@ -88,27 +83,30 @@ def measureRandSpread(trials):
     print("\nRecall (attack class = 1) across ",trials," runs: ", recall_scores)
     print("Mean recall: ",np.mean(recall_scores),", Standard Deviation: ",np.std(recall_scores))
 
-# UDP LAG test first only
 # MAIN PROGRAM STUFF ===============================================================
 # DATASET CODE ----------------------------------
-# for real dataset: df = pd.read_csv("set.csv")
-# data preprocessing? 
-# df.columns = df.columns.str.strip()
-# df.loc[:,'Label'].unique()
-# df=df.dropna() 
-# (df.dtypes=='object')
-# df['Label'] = df['Label'].map({'normal':0, 'ddos':1})
 # should i use matplotlib?? (can use to check/visualize distribution of classes)
 
 if (DATA_FLAG):
-    print("Loading DrDoS_UDP.gz... please wait...")
-    X, y = joblib.load("data/training_network_data.joblib")
-    print("Loaded features:", X.shape)
-    print("Loaded labels:,", y.shape)
+    joblib_dir = "data/joblibs"
+    all_X, all_y = [], []
+    for f in os.listdir(joblib_dir):
+        if f.endswith(".joblib"):
+            X, y = joblib.load(os.path.join(joblib_dir, f))
+            all_X.append(X)
+            all_y.append(y)
+    X = pd.concat(all_X, ignore_index=True)
+    y = pd.concat(all_y, ignore_index=True)
+
+    print("Loaded total dataset:") # should be 111,680
+    print("Features:", X.shape)
+    print("Labels:", y.shape)
     print("Label counts:", y.value_counts())
+
     X = X.replace([np.inf, -np.inf], np.nan)
     X = X.fillna(0)
     X = X.clip(-1e12, 1e12)
+    X = X.astype(np.float32)
 
 else: 
     data = genDummyData()

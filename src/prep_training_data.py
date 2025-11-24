@@ -1,14 +1,31 @@
-import os, sys, math
+import os, sys, math, joblib, time, csv
 import numpy as np
 import pandas as pd
-import joblib
 
 from collections import Counter
 from .Connection import load_pickle, get_match_rows
-#
-#DATA_FILES = ["DrDos_DNS.gz", "DrDos_LDAP.gz", "DrDos_MSSQL.gz", "DrDos_NetBIOS.gz", "DrDos_NTP.gz", "DrDos_SNMP.gz", "DrDos_SSDP.gz", "DrDos_UDP.gz", "Syn.gz", "TFTP.gz", "UDPLag.gz"]
-DATA_FILES = "data/DrDoS_UDP_74len.gz"
-#LABEL_COL = 87
+
+
+ATTACK_TYPES = {"DNS","LDAP","MSSQL","NETBIOS","NTP","SNMP","SSDP","SYN","TFTP","UDP","UDPLAG"}
+DATA_FILES = {
+    key: {
+        "raw":f"data/raw/DrDoS_{key}_74len.gz",
+        "joblib":f"data/joblibs/training_{key}_data.joblib"
+    }
+    for key in ATTACK_TYPES
+}
+
+print("Available datasets:", ", ".join(DATA_FILES))
+
+FILE_KEY = input("Enter which dataset you'd like: ").upper().strip()
+while FILE_KEY not in DATA_FILES:
+    print(f"[!] ERROR: dataset '{FILE_KEY}' not listed.")
+    print(" Please choose from",", ".join(DATA_FILES.keys()))
+    FILE_KEY = input("Enter which dataset you'd like: ").upper().strip()
+
+config = DATA_FILES[FILE_KEY]
+DATA_FILE = config["raw"]
+LABEL_COL = None
 FLOWID_COL = 1
 SEED_VAL = 42
 BALANCE_FLAG = True
@@ -22,32 +39,19 @@ attacks_all = []
 n_attack = 0
 n_benign = 0
 
-'''for fname in (DATA_FILES):
-    if not os.path.exists(fname): 
-        print(f"File {fname} not found, skipping.")
-        continue
-    try: 
-        print(f"[load] {fname} ...")
-        rows = load_pickle(fname)   # list of lists
-        n = len(rows)
-        labels = [r[LABEL_COL] for r in rows]
-        c = Counter(labels)
-        overall_counts.update(c)
-        per_file.append((fname, n, dict(c)))
+start = time.time()
+print(f"[load] {DATA_FILE} ...")
 
-        benign_rows = get_match_rows(rows, LABEL_COL, 0)
-        benign_all.extend(benign_rows)
+if not os.path.exists(DATA_FILE):
+    print(f"[!] ERROR: file {DATA_FILE} not found, ABORT.")
+    sys.exit(1)
 
-        attacks_rows = [r for r in rows if r[LABEL_COL] != 0]
-        attacks_all.extend(attacks_rows)
+try:
+    rows = load_pickle(DATA_FILE)
+except Exception as e:
+    print(f"[!] ERROR: failed to load {DATA_FILE}: {e}")
+    sys.exit(1)
 
-        print(f"  rows: {n:,}, label counts: {dict(c)} | benign in file: {len(benign_rows):,}")
-
-    except Exception as e: 
-        print(f"[error] {fname}: {e}")'''
-
-print(f"[load] {DATA_FILES} ...")
-rows = load_pickle(DATA_FILES)
 n = len(rows)
 
 if not rows:
@@ -59,14 +63,15 @@ print(f"Loaded {n:,} rows with {num_cols} columns each")
 LABEL_COL = num_cols - 1
 
 filtered_rows = [r for r in rows if len(r) > LABEL_COL]
-if len(filtered_rows) < len(rows):
-    print(f"[!] WARNING: Dropped {len(rows) - len(filtered_rows)} rows with too few columns.")
+dropped = len(rows) - len(filtered_rows)
+if dropped > 0:
+    print(f"[!] WARNING: Dropped {dropped:,} bad rows.")
 rows = filtered_rows
 
 labels = [r[LABEL_COL] for r in rows]
 c = Counter(labels)
 overall_counts.update(c)
-per_file.append((DATA_FILES, n, dict(c)))
+per_file.append((DATA_FILE, n, dict(c)))
 
 benign_rows = get_match_rows(rows, LABEL_COL, 0)
 benign_all.extend(benign_rows)
@@ -123,6 +128,32 @@ X = X.dropna(axis=1, how="all").fillna(0)
 
 print(f"Features shape: {X.shape} | Labels: {y.value_counts().to_dict()}")
 
-out_path = "data/training_network_data.joblib"
+out_path = config["joblib"]
 joblib.dump((X,y), out_path)
 print(f"\nTraining data saved to {out_path}!")
+duration = time.time() - start
+mins, secs = divmod(duration, 60)
+print(f"Completed in {int(mins)} min {secs:.1f} sec")
+
+timing_record = [FILE_KEY,
+                 n,
+                 len(benign_all),
+                 len(attacks_all),
+                 X.shape[1],
+                 len(X),
+                 round(duration, 2)]
+
+csv_path = "data/preprocessing_times.csv"
+write_header = not os.path.exists(csv_path)
+with open(csv_path, "a", newline="") as f:
+    writer = csv.writer(f)
+    if write_header:
+        writer.writerow(["dataset", 
+                         "rows_loaded", 
+                         "benign_count",
+                         "attack_count",
+                         "features",
+                         "total_samples",
+                         "seconds"])
+    writer.writerow(timing_record)
+print(f"datafile info appended to {csv_path}")
