@@ -141,6 +141,15 @@ def append_metrics(csv_path, header, row):
         if new_file: writer.writerow(header)
         writer.writerow(row)
 
+# finalize_plot():
+def finalize_plot(model_dir, filename, message_prefix=None):
+    path = os.path.join(model_dir, filename)
+    plt.tight_layout()
+    plt.savefig(path)
+    plt.show()
+    if message_prefix: print(f"{message_prefix} saved to {path}")
+    return path
+
 # MAIN PROGRAM STUFF ===============================================================
 # DATASET CODE ----------------------------------
 if (DATA_FLAG):
@@ -223,7 +232,17 @@ print("\n=== Confusion Matrix ===")
 cm = confusion_matrix(y_test, y_pred)
 print(cm)
 
-# confusion matrix png
+# cm df
+cm_df = pd.DataFrame(
+    cm,
+    index=['True_0', 'True_1'],
+    columns=['Pred_0', 'Pred_1']
+)
+cm_csv_path = os.path.join(model_dir, "confusion_matrix.csv")
+cm_df.to_csv(cm_csv_path)
+print(f"Confusion matrix saved to {cm_csv_path}")
+
+# cm png
 plt.figure(figsize=(6,5))
 plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
 plt.title(f"Confusion Matrix ({model_name})")
@@ -239,17 +258,27 @@ for i in range(cm.shape[0]):
                  color="white" if cm[i,j] > thresh else "black")
 plt.ylabel('True')
 plt.xlabel('Predicted')
-plt.tight_layout()
-plt.savefig(os.path.join(model_dir, "confusion_matrix.png"))
-plt.show()
+finalize_plot(model_dir, "confusion_matrix.png")
 
 # model metrics logging 
 accuracy = accuracy_score(y_test, y_pred)
 precision = precision_score(y_test, y_pred, zero_division=0)
 recall = recall_score(y_test, y_pred, zero_division=0)
 f1 = f1_score(y_test, y_pred, zero_division=0)
-fpr, tpr, thresholds = roc_curve(y_test, y_prob)
+fpr, tpr, _ = roc_curve(y_test, y_prob)
 roc_auc = auc(fpr, tpr)
+
+# ROC curve plot
+plt.figure(figsize=(6,5))
+plt.plot(fpr, tpr, label=f"ROC curve (AUC = {roc_auc:.4f})")
+plt.plot([0,1], [0,1], linestyle="--")
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title(f"ROC Curve ({model_name})")
+plt.legend(loc="lower right")
+roc_path = finalize_plot(model_dir, "roc_curve.png", message_prefix="ROC curve")
 
 metrics_header = [
     "model_name",
@@ -294,22 +323,19 @@ feature_importance_dict = dict(
 )
 
 print("\n\nFeature Importances:")
-for name, score in sorted(feature_importance_dict.items(), key=lambda x: x[1], reverse=True): print(f"{name}: {score:.4f}")
-sorted_items = list(feature_importance_dict.items())
-top_items = sorted_items[:20]
+for name, score in feature_importance_dict.items(): print(f"{name}: {score:.4f}")
+top_items = list(feature_importance_dict.items())[:20]
 feature_names = [name for name, _ in top_items]
 top_importances = [score for _, score in top_items]
 
 # feature importances bar chart (top 20)
 plt.figure(figsize=(8,6))
-plt.barh(range(top_items), top_importances, align="center")
-plt.yticks(range(top_items), feature_names)
+plt.barh(range(len(top_items)), top_importances, align="center")
+plt.yticks(range(len(top_items)), feature_names)
 plt.xlabel("Importance")
 plt.title(f"Top Feature Importances ({model_name})")
 plt.gca().invert_yaxis()
-plt.tight_layout()
-plt.savefig(os.path.join(model_dir, "feature_importances.png"))
-plt.show()
+finalize_plot(model_dir, "feature_importances.png")
 
 # test rand spread func
 #measureRandSpread(10) # i think too many trials caused an error? check that!!
@@ -335,7 +361,6 @@ print("")
 #   add max_depth to random forest classifier??
 #   FOR ACTUAL DATASET: either reduce n_estimators or use smaller data subset. do not melt thy laptop its already funky 
 #   for dummy dataset, used short/bursty duration only for ddos (could've also used extremely long/stuck), think about adding both in? 
-#   **Look into standard scaling??? 
 #
 # TODO:
 #       - add more metrics stuff? reports, etc
