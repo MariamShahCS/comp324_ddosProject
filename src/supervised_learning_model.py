@@ -1,18 +1,31 @@
 import pandas as pd
 import numpy as np
-import joblib, os
+import matplotlib.pyplot as plt
+import joblib, os, random, csv
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score, precision_score, recall_score, roc_curve, auc
+from .features import FEATURE_NAMES
 
 # GLOBAL VARIABLES =========================================
-SEED_VAL = 42 # for random seeding/testing reproducability
-RAND_FLAG = True   # if random set True, else if fixed set False
-DATA_FLAG = True   # if using dummyData set False, if using actual data set True
+SEED_VAL = 42           # for random seeding/testing reproducability, you hitchhiker
+RAND_FLAG = True        # if random set True, elif fixed set False
+DATA_FLAG = True        # if using dummyData set False, elif using real data set True
+ALL_SETS_FLAG = False   # if using all (real) datasets set True, elif want user input to select datasets set False
+ATTACK_TYPES = ["DNS","LDAP","MSSQL","NETBIOS","NTP","SNMP","SSDP","SYN","TFTP","UDP","UDPLAG"]
+JOBLIB_FILES = {
+                key:f"data/joblibs/training_{key}_data.joblib"
+                for key in ATTACK_TYPES
+                }
 
-# FUNCTION DEFINITIONS ==================================
+# PATH CHECKS ==============================================
+os.makedirs("reports", exist_ok=True)
+os.makedirs("models", exist_ok=True)
+
+# FUNCTION DEFINITIONS =====================================
 # genDummyData(): generate dummy dataset with super simple indicators
+# - returns a dataframe
 def genDummyData(n_samples=2000, ddos_ratio=0.3):
     if (RAND_FLAG): rng = np.random.default_rng()
     else:           rng = np.random.default_rng(SEED_VAL)
@@ -56,7 +69,8 @@ def genDummyData(n_samples=2000, ddos_ratio=0.3):
     
     return df
 
-# measureRandSpread(): measure random spread accuracy, only rand trials
+# measureRandSpread(): measure & print random spread accuracy, only rand trials
+# - enter parameter # of trials you'd like to measure
 def measureRandSpread(trials):
     acc_scores = []
     recall_scores = []
@@ -83,42 +97,103 @@ def measureRandSpread(trials):
     print("\nRecall (attack class = 1) across ",trials," runs: ", recall_scores)
     print("Mean recall: ",np.mean(recall_scores),", Standard Deviation: ",np.std(recall_scores))
 
+# random_uid(): generates a unique random id for output model identification
+# - returns 4 characters
+def random_uid(k=4):
+    chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789"
+    return ''.join(random.choices(chars, k=k))
+
+# safe_model_folder(): creates a unique directory using base_name for trained model
+def safe_model_folder(base_name, root="models", counter=1):
+    while True:
+        uid = random_uid()
+        folder_name = f"{base_name}_{counter}_{uid}"
+        model_dir = os.path.join(root, folder_name)
+        if not os.path.exists(model_dir): 
+            os.makedirs(model_dir, exist_ok=True)
+            model_path = os.path.join(model_dir, "model.joblib")
+            return folder_name, model_dir, model_path
+        counter += 1
+
+# get_user_datasets(): handles user input for dataset selection
+# - returns selected dataset names & base file name
+def get_user_datasets():
+    print("Available datasets:", ", ".join(ATTACK_TYPES))
+    while True:
+        user_input = input("Enter datasets (comma-separated, or 'ALL'): ").upper().strip()
+        if user_input == "ALL": return ATTACK_TYPES, "model_allsets"
+        sets = [x.strip() for x in user_input.split(",") if x.strip()]
+        #validate
+        bad = [k for k in sets if k not in JOBLIB_FILES]
+        if bad:
+            print(f"[!] ERROR: Invalid dataset keys: {bad}")
+            print("Valid options are:", ", ".join(ATTACK_TYPES))
+            continue
+        if len(sets) == 1: base = f"model_{sets[0]}"
+        else:              base = f"model_{len(sets)}sets"
+        return sets, base
+
+# append_metrics()
+def append_metrics(csv_path, header, row):
+    new_file = not os.path.exists(csv_path)
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if new_file: writer.writerow(header)
+        writer.writerow(row)
+
 # MAIN PROGRAM STUFF ===============================================================
 # DATASET CODE ----------------------------------
-# should i use matplotlib?? (can use to check/visualize distribution of classes)
-
 if (DATA_FLAG):
-    joblib_dir = "data/joblibs"
+    if (ALL_SETS_FLAG):
+        USED_DATASETS = ATTACK_TYPES
+        base_name = "model_allsets"
+        print("\nTraining model on ALL datasets:")
+    else: USED_DATASETS, base_name = get_user_datasets()
+    
+    # load the specified datasets, collect & append features/labels
+    print("Loading datasets now.")
     all_X, all_y = [], []
-    for f in os.listdir(joblib_dir):
-        if f.endswith(".joblib"):
-            X, y = joblib.load(os.path.join(joblib_dir, f))
-            all_X.append(X)
-            all_y.append(y)
+    for key in USED_DATASETS:
+        path = JOBLIB_FILES[key]
+        print(f"Loading {path}")
+        X_part, y_part = joblib.load(path)
+        all_X.append(X_part)
+        all_y.append(y_part)
     X = pd.concat(all_X, ignore_index=True)
     y = pd.concat(all_y, ignore_index=True)
+    print(", ".join(USED_DATASETS))
 
-    print("Loaded total dataset:") # should be 111,680
-    print("Features:", X.shape)
-    print("Labels:", y.shape)
-    print("Label counts:", y.value_counts())
-
+    # clean up features
     X = X.replace([np.inf, -np.inf], np.nan)
     X = X.fillna(0)
     X = X.clip(-1e12, 1e12)
     X = X.astype(np.float32)
 
+    # Print info for total datasets being used 
+    print("Loaded total dataset:") # should be 111,680 if ALL_SETS_FLAG
+    print("Features:", X.shape)
+    print("Labels:", y.shape)
+    print("Label counts:", y.value_counts())
+
+    name_map = {}
+    for col in X.columns:
+        if isinstance(col, int) and 0 <= col < len(FEATURE_NAMES): name_map[col] = FEATURE_NAMES[col]
+        else: name_map[col] = f"feature_{col}"
+    X = X.rename(columns=name_map)
+
 else: 
+    # preparing dummy data
     data = genDummyData()
     print(data.head())
     print(data["label"].value_counts()) # num of normal rows, # of ddos rows
+    X = data.drop(columns=["label"]) 
+    y = data["label"]
+    USED_DATASETS = ["DUMMY_DATA"]
+    base_name = "model_dummyset"
+    print("\nTraining model on dummy dataset")
 
 # MODEL CODE ------------------------------------------
 # train/test split
-if (not DATA_FLAG):
-    X = data.drop(columns=["label"]) 
-    y = data["label"]
-
 if (RAND_FLAG): X_train, X_test, y_train, y_test = train_test_split(X,y, test_size=0.2, stratify=y)
 else: X_train, X_test, y_train, y_test = train_test_split(X,y, test_size=0.2, stratify=y, random_state=SEED_VAL)
 print("\nTrain shape:", X_train.shape, " Test shape:", X_test.shape)
@@ -131,58 +206,139 @@ else: rf_model = RandomForestClassifier( n_estimators=200, class_weight="balance
 rf_model.fit(X_train, y_train)
 print("\nModel trained successfully!")
 
+# create unique folder for this trained model
+model_name, model_dir, model_path = safe_model_folder(base_name)
+print(f"\nModel run ID: {model_name}")
+print("Outputs will be stored in:", model_dir)
+
 # detect/eval test split data
 y_pred = rf_model.predict(X_test)
 y_prob = rf_model.predict_proba(X_test)[:,1]
 
+# model reports -------------------------------------------------------------------
 print("\n=== Classification Report ===")
 print(classification_report(y_test, y_pred, digits=4))
 
 print("\n=== Confusion Matrix ===")
-print(confusion_matrix(y_test, y_pred))
+cm = confusion_matrix(y_test, y_pred)
+print(cm)
 
-# feature importance
-feat_importances = rf_model.feature_importances_ 
-for name, score in zip(X.columns, feat_importances): print(f"{name}:{score:.4f}")
+# confusion matrix png
+plt.figure(figsize=(6,5))
+plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title(f"Confusion Matrix ({model_name})")
+plt.colorbar()
+tick_marks = np.arange(2)
+plt.xticks(tick_marks, ['Benign (0)', 'DDoS (1)'])
+plt.yticks(tick_marks, ['Benign (0)', 'DDoS (1)'])
+thresh = cm.max() / 2
+for i in range(cm.shape[0]):
+    for j in range(cm.shape[1]):
+        plt.text(j, i, format(cm[i,j], 'd'),
+                 ha="center", va="center",
+                 color="white" if cm[i,j] > thresh else "black")
+plt.ylabel('True')
+plt.xlabel('Predicted')
+plt.tight_layout()
+plt.savefig(os.path.join(model_dir, "confusion_matrix.png"))
+plt.show()
 
-#og = [578324]
-#new = [0, ] # binary based on threshold (normal vs ddos)
+# model metrics logging 
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred, zero_division=0)
+recall = recall_score(y_test, y_pred, zero_division=0)
+f1 = f1_score(y_test, y_pred, zero_division=0)
+fpr, tpr, thresholds = roc_curve(y_test, y_prob)
+roc_auc = auc(fpr, tpr)
 
+metrics_header = [
+    "model_name",
+    "datasets_used",
+    "accuracy",
+    "precision",
+    "recall",
+    "f1_score",
+    "roc_auc",
+    "num_features",
+    "timestamp"
+]
+metrics_row = [
+    model_name, 
+    ";".join(USED_DATASETS),
+    accuracy,
+    precision,
+    recall,
+    f1,
+    roc_auc,
+    X_train.shape[1],
+    pd.Timestamp.now()
+]
+
+# metrics records
+global_metrics_csv = "reports/model_metrics.csv"
+append_metrics(global_metrics_csv, metrics_header, metrics_row)
+print(f"\nMetrics appended to {global_metrics_csv}")
+
+per_model_csv = os.path.join(model_dir, "metrics.csv")
+append_metrics(per_model_csv, metrics_header, metrics_row)
+print(f"Metrics saved to {per_model_csv}")
+
+# model feature importances
+feat_importances = rf_model.feature_importances_
+feature_importance_dict = dict(
+    sorted(
+        ((name, float(score)) for name, score in zip(X.columns, feat_importances)),
+        key=lambda x: x[1],
+        reverse=True
+    )
+)
+
+print("\n\nFeature Importances:")
+for name, score in sorted(feature_importance_dict.items(), key=lambda x: x[1], reverse=True): print(f"{name}: {score:.4f}")
+sorted_items = list(feature_importance_dict.items())
+top_items = sorted_items[:20]
+feature_names = [name for name, _ in top_items]
+top_importances = [score for _, score in top_items]
+
+# feature importances bar chart (top 20)
+plt.figure(figsize=(8,6))
+plt.barh(range(top_items), top_importances, align="center")
+plt.yticks(range(top_items), feature_names)
+plt.xlabel("Importance")
+plt.title(f"Top Feature Importances ({model_name})")
+plt.gca().invert_yaxis()
+plt.tight_layout()
+plt.savefig(os.path.join(model_dir, "feature_importances.png"))
+plt.show()
 
 # test rand spread func
 #measureRandSpread(10) # i think too many trials caused an error? check that!!
 
 # save trained model to a file
-joblib.dump(rf_model, "supervised_learning_ddos_detector.joblib")
-print("\nModel saved to supervised_learning_ddos_detector.joblib")
+joblib.dump({
+    "model": rf_model,
+    "datasets_used": USED_DATASETS,
+    "feature_names": list(X.columns),
+    "feature_importances": feature_importance_dict
+}, model_path)
+print("\nModel was trained using datasets:", ", ".join(USED_DATASETS))
+print(f"\nModel saved to {model_path}")
+print("All model artifacts stored in:", model_dir)
+print("")
 
 # ------------------------------------------------------
-# ^^^ wrote a dummy dataset generator using numpy, created a data frame using pandas
-# ^^^   distributed dummy network traffic from dataset for test/train split (features=X, labels=y)
-#       random forest model of 200 trees, balanced distribution in case not many ddos samples (if normal/ddos is imbalanced), currently uses all cores
-#       binary classification (0 = normal, 1 = ddos)
+# binary classification (0 = normal, 1 = ddos)
 # 
 # ********IMPORTANT: Fixed to random, vice versa: rng declaration, df declaration, train/test split, random forest classifier********
 # Notes
-#   replace dummy dataset
 #   try different n_estimators (& other classifiers) to tune model & improve recall/precision
-#   work on visualization?? (do something about trial prints?)
 #   add max_depth to random forest classifier??
-#   probably might need to write preprocessing code??? check tutorial once have real dataset?
-#   will possibly need to use strip(), dropna(), map(), etc??? diff df, everything else (model logic) should mostly be same tho.
-#       FOR ACTUAL DATASET: either reduce n_estimators or use smaller data subset. do not melt thy laptop its already funky 
+#   FOR ACTUAL DATASET: either reduce n_estimators or use smaller data subset. do not melt thy laptop its already funky 
 #   for dummy dataset, used short/bursty duration only for ddos (could've also used extremely long/stuck), think about adding both in? 
 #   **Look into standard scaling??? 
-
-# write stuff to save results/metrics, and to save experiment stability (GOOD FOR REPORTS/WRITE UPS/PRESENTATION)
-
-# should i also use logistic regression/neural network??
-
-# joblib stuff:
-# to eval w/o retraining in new file:
-#   import joblib & pandas
-# -> rf_model = joblib.load("ddos_detector.joblib")
-# -> load new data to eval: data = pd.DataFrame({...})
-# -> evals = rf_model.predict(data), print(evals) # EX output: [0 1] 
+#
+# TODO:
+#       - add more metrics stuff? reports, etc
+#       - add in logistic regression and neural network
 # -------------------------------------------------------
 #   TUTORIAL BASE USED: https://www.labellerr.com/blog/ddos-attack-detection/#building-a-ddos-detection-model

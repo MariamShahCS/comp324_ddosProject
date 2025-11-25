@@ -124,6 +124,9 @@ X = X.dropna(axis=1, how="all").fillna(0)
 
 print(f"Features shape: {X.shape} | Labels: {y.value_counts().to_dict()}")
 
+print("\n")
+print(X.head())
+print(X.columns)
 # output joblib file
 out_path = config["joblib"]
 joblib.dump((X,y), out_path)
@@ -148,7 +151,7 @@ timing_record = [FILE_KEY,
                  len(X),
                  round(duration, 2)]
 
-csv_path = "data/preprocessing_times.csv"
+csv_path = "reports/preprocessing_times.csv"
 os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 write_header = not os.path.exists(csv_path)
 with open(csv_path, "a", newline="") as f:
