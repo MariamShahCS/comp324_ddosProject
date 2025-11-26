@@ -16,10 +16,10 @@ from .features import FEATURE_NAMES
 SEED_VAL = 42           # for random seeding/testing reproducability, you hitchhiker
 
 # FLags -----------------------------------------------------------------------------------------------------------------
-ALL_SETS_FLAG = False   # if using all (real) datasets set True, elif want user input to select datasets set False
-DATA_FLAG = False        # if using dummyData set False, elif using real data set True
-MODEL_FLAG = False       # if using default model set False, elif want user to select model set True
-RAND_FLAG = True        # if random set True, elif fixed set False
+ALL_SETS_FLAG = False   # False = prompt user to select datasets, True = use all (real) datasets
+DATA_FLAG = True        # False = use dummy data, True = use real datasets
+MODEL_FLAG = True       # False = use default model (RF), True = prompt user to choose model
+RAND_FLAG = False        # False = not random (uses SEED_VAL), True = random
 
 # Lists -----------------------------------------------------------------------------------------------------------------
 ATTACK_TYPES = ["DNS","LDAP","MSSQL","NETBIOS","NTP","SNMP","SSDP","SYN","TFTP","UDP","UDPLAG"]
@@ -396,16 +396,13 @@ print(f"\nModel saved to {model_path}")
 print("All model artifacts stored in:", model_dir)
 print("")
 
-# =============================================================================================================================================
+# NOTES =============================================================================================================================================
 # binary classification (0 = normal, 1 = ddos)
-# 
-# ********IMPORTANT: Fixed to random, vice versa: rng declaration, df declaration, train/test split, random forest classifier********
-# Notes
-#   try different n_estimators (& other classifiers) to tune model & improve recall/precision
-#   add max_depth to random forest classifier??
-#   for dummy dataset, used short/bursty duration only for ddos (could've also used extremely long/stuck), think about adding both in? 
+# For random parts: Fixed to random, vice versa: rng declaration, df declaration, train/test split, random forest classifier
 #
-# TODO:
-#       - add more metrics stuff? reports, etc
-# -------------------------------------------------------
+# TO-DO:
+#   - add more metrics stuff? reports, etc
+#   - try different n_estimators (& other classifiers) to tune model & improve recall/precision
+#   - add max_depth to random forest classifier??
+# ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #   TUTORIAL BASE USED: https://www.labellerr.com/blog/ddos-attack-detection/#building-a-ddos-detection-model
