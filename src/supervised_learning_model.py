@@ -17,8 +17,8 @@ SEED_VAL = 42           # for random seeding/testing reproducability, you hitchh
 
 # FLags -----------------------------------------------------------------------------------------------------------------
 ALL_SETS_FLAG = False   # if using all (real) datasets set True, elif want user input to select datasets set False
-DATA_FLAG = True        # if using dummyData set False, elif using real data set True
-MODEL_FLAG = True       # if using default model set False, elif want user to select model set True
+DATA_FLAG = False        # if using dummyData set False, elif using real data set True
+MODEL_FLAG = False       # if using default model set False, elif want user to select model set True
 RAND_FLAG = True        # if random set True, elif fixed set False
 
 # Lists -----------------------------------------------------------------------------------------------------------------
@@ -90,37 +90,6 @@ def genDummyData(n_samples=2000, ddos_ratio=0.3):
     else:           df = df.sample(frac=1.0, random_state=SEED_VAL).reset_index(drop=True)
     
     return df
-
-# measureRandSpread(): measure & print random spread accuracy, only rand dummy trials
-# - enter parameter # of trials you'd like to measure
-def measureRandSpread(trials):
-    if RAND_FLAG:
-        acc_scores = []
-        recall_scores = []
-
-        for i in range(trials):
-            data = genDummyData()
-            if (i<3): print("\n===Sample of data from trial ",i,"===\n",data.head())
-
-            X = data.drop(columns=["label"])
-            y = data["label"]
-            X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.2,stratify=y)
-            model = RandomForestClassifier(n_estimators=200,class_weight="balanced",n_jobs=-1)
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
-
-            #trial accuracy
-            acc = accuracy_score(y_test, y_pred)
-            acc_scores.append(acc)
-            #recall on ddos for trial # UPDATE TO USE LIBRARY FUNC? (recall_score)
-            report = classification_report(y_test, y_pred, output_dict=True)
-            recall_attack = report["1"]["recall"]
-            recall_scores.append(recall_attack)
-
-        print("\nAccuracy across ", trials, " runs:", acc_scores)
-        print("Mean:", np.mean(acc_scores), ", Standard Deviation:", np.std(acc_scores))
-        print("\nRecall (attack class = 1) across ",trials," runs: ", recall_scores)
-        print("Mean recall: ",np.mean(recall_scores),", Standard Deviation: ",np.std(recall_scores))
 
 # get_user_datasets(): handles user input for dataset selection
 # - returns selected dataset names & base file name
@@ -210,7 +179,6 @@ def get_feature_importance_dict(model, X):
         )
     )
     return feature_importance_dict
-
 
 # MAIN PROGRAM START =======================================================================================================
 # DATASET CODE -------------------------------------------------------------------------------------------------------------
@@ -414,10 +382,7 @@ if feature_importance_dict is not None:
     finalize_plot(model_dir, "feature_importances.png")
 else: feature_importance_dict = {}
 
-# test rand spread func
-#measureRandSpread(10) # i think too many trials caused an error? check that!!
-
-# save trained model to a file
+# SAVE TRAINED MODEL TO JOBLIB FILE ==========================================================================================================
 joblib.dump({
     "model": model,
     "scaler": scaler if MODEL_TYPE in ["LR", "NN"] else None,
@@ -431,7 +396,7 @@ print(f"\nModel saved to {model_path}")
 print("All model artifacts stored in:", model_dir)
 print("")
 
-# ------------------------------------------------------
+# =============================================================================================================================================
 # binary classification (0 = normal, 1 = ddos)
 # 
 # ********IMPORTANT: Fixed to random, vice versa: rng declaration, df declaration, train/test split, random forest classifier********
