@@ -19,7 +19,7 @@ SEED_VAL = 42           # for random seeding/testing reproducability, you hitchh
 ALL_SETS_FLAG = False   # False = prompt user to select datasets, True = use all (real) datasets
 DATA_FLAG = True        # False = use dummy data, True = use real datasets
 MODEL_FLAG = True       # False = use default model (RF), True = prompt user to choose model
-RAND_FLAG = False        # False = not random (uses SEED_VAL), True = random
+RAND_FLAG = False       # False = not random (uses SEED_VAL), True = random
 
 # Lists -----------------------------------------------------------------------------------------------------------------
 ATTACK_TYPES = ["DNS","LDAP","MSSQL","NETBIOS","NTP","SNMP","SSDP","SYN","TFTP","UDP","UDPLAG"]
