@@ -5,26 +5,48 @@ import joblib, os, random, csv
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
+
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score, precision_score, recall_score, roc_curve, auc
 from .features import FEATURE_NAMES
 
-# GLOBAL VARIABLES =========================================
+# GLOBAL VARIABLES ======================================================================================================
 SEED_VAL = 42           # for random seeding/testing reproducability, you hitchhiker
-RAND_FLAG = True        # if random set True, elif fixed set False
-DATA_FLAG = True        # if using dummyData set False, elif using real data set True
-ALL_SETS_FLAG = False   # if using all (real) datasets set True, elif want user input to select datasets set False
-ATTACK_TYPES = ["DNS","LDAP","MSSQL","NETBIOS","NTP","SNMP","SSDP","SYN","TFTP","UDP","UDPLAG"]
-JOBLIB_FILES = {
-                key:f"data/joblibs/training_{key}_data.joblib"
-                for key in ATTACK_TYPES
-                }
 
-# PATH CHECKS ==============================================
+# FLags -----------------------------------------------------------------------------------------------------------------
+ALL_SETS_FLAG = False   # if using all (real) datasets set True, elif want user input to select datasets set False
+DATA_FLAG = True        # if using dummyData set False, elif using real data set True
+MODEL_FLAG = True       # if using default model set False, elif want user to select model set True
+RAND_FLAG = True        # if random set True, elif fixed set False
+
+# Lists -----------------------------------------------------------------------------------------------------------------
+ATTACK_TYPES = ["DNS","LDAP","MSSQL","NETBIOS","NTP","SNMP","SSDP","SYN","TFTP","UDP","UDPLAG"]
+MODEL_TYPES_LIST = ["RF", "LR", "NN"]
+
+# Dictionaries
+JOBLIB_FILES = {
+    key:f"data/joblibs/training_{key}_data.joblib"
+    for key in ATTACK_TYPES
+}
+MODEL_NAMES = {
+    "RF":"Random Forest",
+    "LR":"Logistic Regression",
+    "NN":"Neural Network"
+}
+
+# Other
+MODEL_TYPE = MODEL_TYPES_LIST[0] # set default model to random forest
+
+# PATH CHECKS ============================================================================================================
 os.makedirs("reports", exist_ok=True)
 os.makedirs("models", exist_ok=True)
 
-# FUNCTION DEFINITIONS =====================================
-# genDummyData(): generate dummy dataset with super simple indicators
+# FUNCTION DEFINITIONS ===================================================================================================
+
+# dummy functions---------------------------------------------------------------------------------------------------------
+# genDummyData(): generate dummy dataset with super simple attack indicators
 # - returns a dataframe
 def genDummyData(n_samples=2000, ddos_ratio=0.3):
     if (RAND_FLAG): rng = np.random.default_rng()
@@ -69,51 +91,36 @@ def genDummyData(n_samples=2000, ddos_ratio=0.3):
     
     return df
 
-# measureRandSpread(): measure & print random spread accuracy, only rand trials
+# measureRandSpread(): measure & print random spread accuracy, only rand dummy trials
 # - enter parameter # of trials you'd like to measure
 def measureRandSpread(trials):
-    acc_scores = []
-    recall_scores = []
-    for i in range(trials):
-        data = genDummyData()
-        if (i<3): print("\n===Sample of data from trial ",i,"===\n",data.head())
-        X = data.drop(columns=["label"])
-        y = data["label"]
-        X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.2,stratify=y)
-        model = RandomForestClassifier(n_estimators=200,class_weight="balanced",n_jobs=-1)
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
+    if RAND_FLAG:
+        acc_scores = []
+        recall_scores = []
 
-        #trial accuracy
-        acc = accuracy_score(y_test, y_pred)
-        acc_scores.append(acc)
-        #recall on ddos for trial # UPDATE TO USE LIBRARY FUNC? (recall_score)
-        report = classification_report(y_test, y_pred, output_dict=True)
-        recall_attack = report["1"]["recall"]
-        recall_scores.append(recall_attack)
+        for i in range(trials):
+            data = genDummyData()
+            if (i<3): print("\n===Sample of data from trial ",i,"===\n",data.head())
 
-    print("\nAccuracy across ", trials, " runs:", acc_scores)
-    print("Mean:", np.mean(acc_scores), ", Standard Deviation:", np.std(acc_scores))
-    print("\nRecall (attack class = 1) across ",trials," runs: ", recall_scores)
-    print("Mean recall: ",np.mean(recall_scores),", Standard Deviation: ",np.std(recall_scores))
+            X = data.drop(columns=["label"])
+            y = data["label"]
+            X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.2,stratify=y)
+            model = RandomForestClassifier(n_estimators=200,class_weight="balanced",n_jobs=-1)
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
 
-# random_uid(): generates a unique random id for output model identification
-# - returns 4 characters
-def random_uid(k=4):
-    chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789"
-    return ''.join(random.choices(chars, k=k))
+            #trial accuracy
+            acc = accuracy_score(y_test, y_pred)
+            acc_scores.append(acc)
+            #recall on ddos for trial # UPDATE TO USE LIBRARY FUNC? (recall_score)
+            report = classification_report(y_test, y_pred, output_dict=True)
+            recall_attack = report["1"]["recall"]
+            recall_scores.append(recall_attack)
 
-# safe_model_folder(): creates a unique directory using base_name for trained model
-def safe_model_folder(base_name, root="models", counter=1):
-    while True:
-        uid = random_uid()
-        folder_name = f"{base_name}_{counter}_{uid}"
-        model_dir = os.path.join(root, folder_name)
-        if not os.path.exists(model_dir): 
-            os.makedirs(model_dir, exist_ok=True)
-            model_path = os.path.join(model_dir, "model.joblib")
-            return folder_name, model_dir, model_path
-        counter += 1
+        print("\nAccuracy across ", trials, " runs:", acc_scores)
+        print("Mean:", np.mean(acc_scores), ", Standard Deviation:", np.std(acc_scores))
+        print("\nRecall (attack class = 1) across ",trials," runs: ", recall_scores)
+        print("Mean recall: ",np.mean(recall_scores),", Standard Deviation: ",np.std(recall_scores))
 
 # get_user_datasets(): handles user input for dataset selection
 # - returns selected dataset names & base file name
@@ -132,8 +139,9 @@ def get_user_datasets():
         if len(sets) == 1: base = f"model_{sets[0]}"
         else:              base = f"model_{len(sets)}sets"
         return sets, base
-
-# append_metrics()
+    
+# Utility functions--------------------------------------------------------------------------------------------------------
+# append_metrics(): appends model metrics to a csv file
 def append_metrics(csv_path, header, row):
     new_file = not os.path.exists(csv_path)
     with open(csv_path, "a", newline="") as f:
@@ -141,17 +149,71 @@ def append_metrics(csv_path, header, row):
         if new_file: writer.writerow(header)
         writer.writerow(row)
 
-# finalize_plot():
+# random_uid(): generates a unique random id for output model identification
+# - returns 4 characters
+def random_uid(k=4):
+    chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789"
+    return ''.join(random.choices(chars, k=k))
+
+# safe_model_folder(): creates a unique directory using base_name for trained model
+# - returns a unique folder name for the model, creates a directory to hold model artifacts, and a path for the joblib file
+def safe_model_folder(base_name, root="models"):
+    while True:
+        uid = random_uid()
+        folder_name = f"{base_name}_{uid}"
+        model_dir = os.path.join(root, folder_name)
+
+        if not os.path.exists(model_dir): 
+            os.makedirs(model_dir, exist_ok=True)
+            model_path = os.path.join(model_dir, "model.joblib")
+            return folder_name, model_dir, model_path
+
+# Plotting functions--------------------------------------------------------------------------------------------------------
+# finalize_plot(): finalizes and saves matplotlib plots
 def finalize_plot(model_dir, filename, message_prefix=None):
     path = os.path.join(model_dir, filename)
     plt.tight_layout()
     plt.savefig(path)
     plt.show()
     if message_prefix: print(f"{message_prefix} saved to {path}")
-    return path
 
-# MAIN PROGRAM STUFF ===============================================================
-# DATASET CODE ----------------------------------
+# Modeling functions--------------------------------------------------------------------------------------------------------
+# choose_model_type(): validates user input to select model type
+def choose_model_type():
+    print("\nAvailable model types:")
+    for m in MODEL_TYPES_LIST: print(f"  {m} ({MODEL_NAMES[m]})")
+    while True:
+        choice = input("Select model type: ").upper().strip()
+        if choice in MODEL_TYPES_LIST: return choice
+        valid_text = ", ".join(f"{m} ({MODEL_NAMES[m]})" for m in MODEL_TYPES_LIST)
+        print(f"[!] ERROR: Invalid choice '{choice}'. Valid options: {valid_text}")
+
+# get_feature_importance_dict(): extracts & sorts feature importances for supported models
+# - returns a dict of model feature importances
+# - returns None if model doesn't provide importances
+def get_feature_importance_dict(model, X):
+    # check if model has feature_importances_ or coef_ attribute
+    if hasattr(model, "feature_importances_"): importances = model.feature_importances_
+    elif hasattr(model, "coef_"):
+        coef = model.coef_
+        if coef.ndim > 1: coef = np.mean(np.abs(coef), axis=0)
+        else: coef = np.abs(coef)
+        importances = coef
+    else: 
+        print("\n[!] WARNING: This model type does not expose feature importances; skipping.")
+        return None
+    feature_importance_dict = dict(
+        sorted(
+            ((name, float(score)) for name, score in zip(X.columns, importances)),
+            key=lambda x: x[1],
+            reverse=True
+        )
+    )
+    return feature_importance_dict
+
+
+# MAIN PROGRAM START =======================================================================================================
+# DATASET CODE -------------------------------------------------------------------------------------------------------------
 if (DATA_FLAG):
     if (ALL_SETS_FLAG):
         USED_DATASETS = ATTACK_TYPES
@@ -179,7 +241,7 @@ if (DATA_FLAG):
     X = X.astype(np.float32)
 
     # Print info for total datasets being used 
-    print("Loaded total dataset:") # should be 111,680 if ALL_SETS_FLAG
+    print("Loaded total dataset:")
     print("Features:", X.shape)
     print("Labels:", y.shape)
     print("Label counts:", y.value_counts())
@@ -201,30 +263,51 @@ else:
     base_name = "model_dummyset"
     print("\nTraining model on dummy dataset")
 
-# MODEL CODE ------------------------------------------
+# MODEL CODE -----------------------------------------------------------------------------------------------------------------
 # train/test split
 if (RAND_FLAG): X_train, X_test, y_train, y_test = train_test_split(X,y, test_size=0.2, stratify=y)
 else: X_train, X_test, y_train, y_test = train_test_split(X,y, test_size=0.2, stratify=y, random_state=SEED_VAL)
 print("\nTrain shape:", X_train.shape, " Test shape:", X_test.shape)
 
-# Random Forest model
-if (RAND_FLAG): rf_model = RandomForestClassifier( n_estimators=200, class_weight="balanced", n_jobs=-1)
-else: rf_model = RandomForestClassifier( n_estimators=200, class_weight="balanced", random_state=SEED_VAL, n_jobs=-1)
+# select model
+if MODEL_FLAG: MODEL_TYPE = choose_model_type()
+
+# standard scaling (for LR and NN)
+scaler = None
+if MODEL_TYPE in ["LR", "NN"]:
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+# build model
+if MODEL_TYPE == "RF":
+    # Random Forest model
+    if (RAND_FLAG): model = RandomForestClassifier( n_estimators=200, class_weight="balanced", n_jobs=-1)
+    else: model = RandomForestClassifier( n_estimators=200, class_weight="balanced", random_state=SEED_VAL, n_jobs=-1)
+elif MODEL_TYPE == "LR":
+    # Logistic Regression model
+    if (RAND_FLAG): model = LogisticRegression( max_iter=1000, class_weight="balanced")
+    else: model = LogisticRegression( max_iter=1000, class_weight="balanced", random_state=SEED_VAL)
+elif MODEL_TYPE == "NN":
+    # Neural Network Model
+    if (RAND_FLAG): model = MLPClassifier( hidden_layer_sizes=(128,64,32), activation='relu', solver='adam', max_iter=300, learning_rate='adaptive')
+    else: model = MLPClassifier(hidden_layer_sizes=(128,64,32), activation='relu', solver='adam', max_iter=300, learning_rate='adaptive', random_state=SEED_VAL)
 
 # train model on train split data
-rf_model.fit(X_train, y_train)
-print("\nModel trained successfully!")
+model.fit(X_train, y_train)
+print(f"\n{MODEL_NAMES[MODEL_TYPE]} Model trained successfully!")
 
 # create unique folder for this trained model
+base_name = f"{base_name}_{MODEL_TYPE}"
 model_name, model_dir, model_path = safe_model_folder(base_name)
 print(f"\nModel run ID: {model_name}")
 print("Outputs will be stored in:", model_dir)
 
 # detect/eval test split data
-y_pred = rf_model.predict(X_test)
-y_prob = rf_model.predict_proba(X_test)[:,1]
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:,1]
 
-# model reports -------------------------------------------------------------------
+# MODEL REPORTS ===================================================================================================================
 print("\n=== Classification Report ===")
 print(classification_report(y_test, y_pred, digits=4))
 
@@ -232,7 +315,7 @@ print("\n=== Confusion Matrix ===")
 cm = confusion_matrix(y_test, y_pred)
 print(cm)
 
-# cm df
+# save confusion matrix 
 cm_df = pd.DataFrame(
     cm,
     index=['True_0', 'True_1'],
@@ -242,7 +325,6 @@ cm_csv_path = os.path.join(model_dir, "confusion_matrix.csv")
 cm_df.to_csv(cm_csv_path)
 print(f"Confusion matrix saved to {cm_csv_path}")
 
-# cm png
 plt.figure(figsize=(6,5))
 plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
 plt.title(f"Confusion Matrix ({model_name})")
@@ -260,7 +342,7 @@ plt.ylabel('True')
 plt.xlabel('Predicted')
 finalize_plot(model_dir, "confusion_matrix.png")
 
-# model metrics logging 
+# calc model metrics 
 accuracy = accuracy_score(y_test, y_pred)
 precision = precision_score(y_test, y_pred, zero_division=0)
 recall = recall_score(y_test, y_pred, zero_division=0)
@@ -268,7 +350,7 @@ f1 = f1_score(y_test, y_pred, zero_division=0)
 fpr, tpr, _ = roc_curve(y_test, y_prob)
 roc_auc = auc(fpr, tpr)
 
-# ROC curve plot
+# save ROC curve
 plt.figure(figsize=(6,5))
 plt.plot(fpr, tpr, label=f"ROC curve (AUC = {roc_auc:.4f})")
 plt.plot([0,1], [0,1], linestyle="--")
@@ -278,7 +360,7 @@ plt.xlabel("False Positive Rate")
 plt.ylabel("True Positive Rate")
 plt.title(f"ROC Curve ({model_name})")
 plt.legend(loc="lower right")
-roc_path = finalize_plot(model_dir, "roc_curve.png", message_prefix="ROC curve")
+finalize_plot(model_dir, "roc_curve.png", message_prefix="ROC curve")
 
 metrics_header = [
     "model_name",
@@ -313,36 +395,33 @@ append_metrics(per_model_csv, metrics_header, metrics_row)
 print(f"Metrics saved to {per_model_csv}")
 
 # model feature importances
-feat_importances = rf_model.feature_importances_
-feature_importance_dict = dict(
-    sorted(
-        ((name, float(score)) for name, score in zip(X.columns, feat_importances)),
-        key=lambda x: x[1],
-        reverse=True
-    )
-)
+feature_importance_dict = get_feature_importance_dict(model, X)
 
-print("\n\nFeature Importances:")
-for name, score in feature_importance_dict.items(): print(f"{name}: {score:.4f}")
-top_items = list(feature_importance_dict.items())[:20]
-feature_names = [name for name, _ in top_items]
-top_importances = [score for _, score in top_items]
+if feature_importance_dict is not None:
+    print("\n\nFeature Importances:")
+    for name, score in feature_importance_dict.items(): print(f"{name}: {score:.4f}")
+    top_items = list(feature_importance_dict.items())[:20]
+    feature_names = [name for name, _ in top_items]
+    top_importances = [score for _, score in top_items]
 
-# feature importances bar chart (top 20)
-plt.figure(figsize=(8,6))
-plt.barh(range(len(top_items)), top_importances, align="center")
-plt.yticks(range(len(top_items)), feature_names)
-plt.xlabel("Importance")
-plt.title(f"Top Feature Importances ({model_name})")
-plt.gca().invert_yaxis()
-finalize_plot(model_dir, "feature_importances.png")
+    # feature importances bar chart (top 20)
+    plt.figure(figsize=(8,6))
+    plt.barh(range(len(top_items)), top_importances, align="center")
+    plt.yticks(range(len(top_items)), feature_names)
+    plt.xlabel("Importance")
+    plt.title(f"Top Feature Importances ({model_name})")
+    plt.gca().invert_yaxis()
+    finalize_plot(model_dir, "feature_importances.png")
+else: feature_importance_dict = {}
 
 # test rand spread func
 #measureRandSpread(10) # i think too many trials caused an error? check that!!
 
 # save trained model to a file
 joblib.dump({
-    "model": rf_model,
+    "model": model,
+    "scaler": scaler if MODEL_TYPE in ["LR", "NN"] else None,
+    "model_type": MODEL_TYPE,
     "datasets_used": USED_DATASETS,
     "feature_names": list(X.columns),
     "feature_importances": feature_importance_dict
@@ -359,11 +438,9 @@ print("")
 # Notes
 #   try different n_estimators (& other classifiers) to tune model & improve recall/precision
 #   add max_depth to random forest classifier??
-#   FOR ACTUAL DATASET: either reduce n_estimators or use smaller data subset. do not melt thy laptop its already funky 
 #   for dummy dataset, used short/bursty duration only for ddos (could've also used extremely long/stuck), think about adding both in? 
 #
 # TODO:
 #       - add more metrics stuff? reports, etc
-#       - add in logistic regression and neural network
 # -------------------------------------------------------
 #   TUTORIAL BASE USED: https://www.labellerr.com/blog/ddos-attack-detection/#building-a-ddos-detection-model
