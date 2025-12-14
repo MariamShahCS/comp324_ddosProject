@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -267,3 +268,4 @@ if __name__ == "__main__":
     best_type, best_metrics = best_model
     print("\nBest model by AUC:", MODEL_NAMES[best_type])
     print("AUC:", best_metrics["auc"])
+
