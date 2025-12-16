@@ -10,7 +10,6 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score, precision_score, recall_score, roc_curve, auc
-from .features import FEATURE_NAMES
 
 # GLOBAL VARIABLES ======================================================================================================
 # FLags -----------------------------------------------------------------------------------------------------------------
@@ -20,7 +19,7 @@ MODEL_FLAG = True       # False = use default model (RF), True = prompt user to 
 RAND_FLAG = False       # False = not random (uses SEED_VAL), True = random
 
 # Lists -----------------------------------------------------------------------------------------------------------------
-ATTACK_TYPES = ["DNS","LDAP","MSSQL","NETBIOS","NTP","SNMP","SSDP","SYN","TFTP","UDP","UDPLAG"]
+ATTACK_TYPES = ["LDAP","MSSQL","NETBIOS","SYN","UDP","UDPLAG"]
 MODEL_TYPES_LIST = ["RF", "LR", "NN"]
 
 # Dictionaries ----------------------------------------------------------------------------------------------------------
@@ -203,13 +202,23 @@ if __name__ == "__main__":
         else: 
             USED_DATASETS, base_name = get_user_datasets()
         
-        # load the specified datasets, collect & append features/labels
+        # load the specified datasets, collect & append features/labels 
         print("Loading datasets now.")
         all_X, all_y = [], []
         for key in USED_DATASETS:
             path = JOBLIB_FILES[key]
             print(f"Loading {path}")
-            X_part, y_part = joblib.load(path)
+            # START OF NEW PART
+
+            loaded = joblib.load(path)
+
+            if isinstance(loaded, dict) and "X_train" in loaded and "y_train" in loaded:
+                X_part, y_part = loaded["X_train"], loaded["y_train"]
+            else: 
+                X_part, y_part = loaded
+
+            # END OF NEW PART
+
             all_X.append(X_part)
             all_y.append(y_part)
         X = pd.concat(all_X, ignore_index=True)
@@ -227,14 +236,6 @@ if __name__ == "__main__":
         print("Features:", X.shape)
         print("Labels:", y.shape)
         print("Label counts:", y.value_counts())
-
-        name_map = {}
-        for col in X.columns:
-            if isinstance(col, int) and 0 <= col < len(FEATURE_NAMES): 
-                name_map[col] = FEATURE_NAMES[col]
-            else: 
-                name_map[col] = f"feature_{col}"
-        X = X.rename(columns=name_map)
 
     else: 
         # preparing dummy data

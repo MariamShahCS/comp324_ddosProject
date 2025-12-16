@@ -1,15 +1,29 @@
 import os, sys, joblib, time, csv
-import numpy as np
 import pandas as pd
-from tqdm import tqdm
 from collections import Counter
-from .Connection import load_pickle
+
+# clean and build dataframe
+def build_Xy(df: pd.DataFrame, label_col: str, flowid_col):
+    y = (df[label_col].astype(str).str.strip().str.lower() != "benign").astype(int)
+
+    drop_cols = [label_col]
+    if flowid_col is not None and isinstance(flowid_col, int) and flowid_col < df.shape[1]:
+        drop_cols.append(df.columns[flowid_col])
+    elif isinstance(flowid_col, str) and flowid_col in df.columns:
+        drop_cols.append(flowid_col)
+
+    X = df.drop(columns=drop_cols, errors="ignore")
+    X = X.apply(pd.to_numeric, errors="coerce")
+    X = X.dropna(axis=1, how="all").fillna(0)
+    return X, y
+
 
 # create a dictionary tracking which dataset is being used
-ATTACK_TYPES = ["DNS","LDAP","MSSQL","NETBIOS","NTP","SNMP","SSDP","SYN","TFTP","UDP","UDPLAG"]
+ATTACK_TYPES = ["LDAP","MSSQL","NETBIOS","SYN","UDP","UDPLAG"]
 DATA_FILES = {
     key: {
-        "raw":f"data/raw/DrDoS_{key}_74len.gz",
+        "train":f"data/raw/{key}_training.parquet",
+        "test":f"data/raw/{key}_testing.parquet",
         "joblib":f"data/joblibs/training_{key}_data.joblib"
     }
     for key in ATTACK_TYPES
@@ -25,111 +39,84 @@ while FILE_KEY not in DATA_FILES:
 
 # create vars to track stuff
 config = DATA_FILES[FILE_KEY]
-DATA_FILE = config["raw"]
-LABEL_COL = None
-FLOWID_COL = 1
+TRAIN_FILE = config["train"]
+TEST_FILE = config["test"]
+LABEL_COL = "Label"
+FLOWID_COL = None
 SEED_VAL = 42
 BALANCE_FLAG = True
 ATTACK_MULTIPLIER = 1
 
-rng = np.random.default_rng(SEED_VAL)
-benign_all = []
-attacks_all = []
-
 # load and start prepping the data
 start = time.time()
 
-# load data file in
-print(f"[load] {DATA_FILE} ...")
-if not os.path.exists(DATA_FILE):
-    print(f"[!] ERROR: file {DATA_FILE} not found, ABORT.")
-    sys.exit(1)
-try:
-    rows = load_pickle(DATA_FILE)
-except Exception as e:
-    print(f"[!] ERROR: failed to load {DATA_FILE}: {e}")
+# load parquet train/test
+print(f"[load train] {TRAIN_FILE}")
+if not os.path.exists(TRAIN_FILE):
+    print(f"[!] ERROR: file {TRAIN_FILE} not found, ABORT.")
     sys.exit(1)
 
-n = len(rows)
-if not rows:
-    print("[!] WARNING: No rows loaded from file, ABORT.")
+print(f"[load test] {TEST_FILE}")
+if not os.path.exists(TEST_FILE):
+    print(f"[!] ERROR: file {TEST_FILE} not found, ABORT.")
     sys.exit(1)
 
-num_cols = len(rows[0])
-print(f"Loaded {n:,} rows with {num_cols} columns each")
-LABEL_COL = num_cols - 1
+df_train = pd.read_parquet(TRAIN_FILE)
+df_test = pd.read_parquet(TEST_FILE)
 
-# ensure all rows are usable
-filtered_rows = [r for r in tqdm(rows, desc="Filtering invalid rows") if len(r) > LABEL_COL]
-dropped = len(rows) - len(filtered_rows)
-if dropped > 0:
-    print(f"[!] WARNING: Dropped {dropped:,} bad rows.")
-rows = filtered_rows
-
-# sort the rows
-benign_rows = [r for r in tqdm(rows, desc="Extracting benign traffic") if r[LABEL_COL] == 0]
-benign_all.extend(benign_rows)
-
-attacks_rows = [r for r in tqdm(rows, desc="Extracting attack traffic") if r[LABEL_COL] != 0]
-attacks_all.extend(attacks_rows)
-
-# print file info
-labels = [r[LABEL_COL] for r in rows]
-c = Counter(labels)
-print("\n--- Dataset Summary ---")
-print(f"File: {DATA_FILE}")
-print(f"Total rows loaded: {n:,}")
-print(f"Label distribution: {dict(c)}")
-print(f"Benign samples: {len(benign_rows):,}")
-print(f"Attack samples: {len(attacks_all):,}")
-
-if len(benign_all) == 0:
-    print("\n[!] WARNING: NO NORMAL TRAFFIC FOUND")
+if LABEL_COL not in df_train.columns or LABEL_COL not in df_test.columns:
+    print(f"[!] ERROR: '{LABEL_COL}' column not found in train/test, ABORT.")
     sys.exit(1)
-elif len(attacks_all) == 0:
-    print("\n[!] WARNING: NO ATTACK TRAFFIC FOUND")
-    sys.exit(1)
-    
-# build a balanced and mixed data subset
+
+print(f"Loaded {len(df_test):,} (TEST) rows with {df_test.shape[1]} columns each")
+print(f"Loaded {len(df_train):,} (TRAIN) rows with {df_train.shape[1]} columns each")
+
+# balance train
+label = df_train[LABEL_COL].astype(str).str.strip().str.lower()
+benign_df = df_train[label == "benign"]   
+attacks_df = df_train[label != "benign"] 
+
 if BALANCE_FLAG:
-    n_benign = len(benign_all)
-    n_attack = min(len(attacks_all), n_benign * ATTACK_MULTIPLIER)
+    
+    c = Counter(label)
+    print("\n--- Training Data Summary ---")
+    print(f"File: {TRAIN_FILE}")
+    print(f"Total rows loaded: {len(df_train):,}")
+    print(f"Label distribution: {dict(c)}")
+    print(f"Benign samples: {len(benign_df):,}")
+    print(f"Attack samples: {len(attacks_df):,}")
+
+    n_benign = len(benign_df)
+    n_attacks = len(attacks_df)
+
+    target_benign = min(n_benign, n_attacks)
+    target_attacks = min(n_attacks, target_benign*ATTACK_MULTIPLIER)
+
+    print(f"\nBuilding dataset with benign={target_benign:,}, attack={target_attacks:,} (multiplier={ATTACK_MULTIPLIER})")
+
+    benign_sample = benign_df.sample(n=target_benign, replace=False, random_state=SEED_VAL)
+    attacks_sample = attacks_df.sample(n=target_attacks, replace=False, random_state=SEED_VAL)
+
+
+    df = pd.concat([benign_sample, attacks_sample], ignore_index=True)
+    df = df.sample(frac=1.0, random_state=SEED_VAL).reset_index(drop=True)
 else:
-    n_benign = min(len(benign_all), 50_000)
-    n_attack = min(len(attacks_all), n_benign * ATTACK_MULTIPLIER)
+    df = df_train
+    print(f"\nBuilding dataset with benign={len(benign_df):,}, attack={len(attacks_df):,}")
 
-print(f"\nBuilding dataset with benign={n_benign:,}, attack={n_attack:,} (multiplier={ATTACK_MULTIPLIER})")
+X_train, y_train = build_Xy(df, LABEL_COL, FLOWID_COL)
+X_test, y_test = build_Xy(df_test, LABEL_COL, FLOWID_COL)
 
-attack_idx = rng.choice(len(attacks_all), size=n_attack, replace=False)
-attack_sample = [attacks_all[i] for i in attack_idx]
+X_test = X_test.reindex(columns=X_train.columns, fill_value=0)
 
-combined = []
-for r in tqdm(benign_all[:n_benign], desc="Adding benign samples"):
-    combined.append(r)
-for r in tqdm(attack_sample, desc="Adding attack samples"):
-    combined.append(r)
-
-df = pd.DataFrame(combined)
-
-y = (df.iloc[:, LABEL_COL] != 0).astype(int) # 0 = benign, 1 = attack
-
-drop_cols = []
-if FLOWID_COL < df.shape[1]:
-    drop_cols.append(df.columns[FLOWID_COL])
-drop_cols.append(df.columns[LABEL_COL])
-
-X = df.drop(columns=drop_cols, errors="ignore")
-X = X.apply(pd.to_numeric, errors="coerce")
-X = X.dropna(axis=1, how="all").fillna(0)
-
-print(f"Features shape: {X.shape} | Labels: {y.value_counts().to_dict()}")
-
-print("\n")
-print(X.head())
-print(X.columns)
 # output joblib file
+# joblib contains: X_train, y_train, X_test, y_test
 out_path = config["joblib"]
-joblib.dump((X,y), out_path)
+os.makedirs(os.path.dirname(out_path), exist_ok=True)
+joblib.dump(
+    {"X_train": X_train, "y_train": y_train, "X_test": X_test, "y_test": y_test},
+    out_path
+)
 
 # duration calc
 print(f"\nTraining data saved to {out_path}!")
@@ -144,11 +131,11 @@ else:
 
 # tracker/records csv file
 timing_record = [FILE_KEY,
-                 n,
-                 len(benign_all),
-                 len(attacks_all),
-                 X.shape[1],
-                 len(X),
+                 len(df_train),
+                 int((y_train == 0).sum()),
+                 int((y_train == 1).sum()),
+                 X_train.shape[1],
+                 len(X_train),
                  round(duration, 2)]
 
 csv_path = "reports/preprocessing_times.csv"
